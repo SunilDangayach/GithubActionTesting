@@ -1,0 +1,241 @@
+plugins {
+    id "java"
+    id "org.springframework.boot"
+    id "io.spring.dependency-management"
+    id "maven-publish"
+    id "org.sonarqube" version "3.3"
+    id "jacoco"
+    id "com.diffplug.spotless" version "6.22.0"
+}
+
+group = "${projGroupId}".toString()
+sourceCompatibility = JavaVersion.VERSION_17
+targetCompatibility = JavaVersion.VERSION_17
+
+spotless {
+    java {
+        palantirJavaFormat()
+    }
+}
+
+//For Pact testing
+//apply from: "gradle/contractTestProvider.gradle"
+
+repositories {
+    maven { url nexusPublicRepoURL }
+    maven { url nexusReleaseRepoURL }
+    mavenCentral()
+}
+
+jar {
+    enabled = false
+}
+
+sonarqube {
+    properties {
+        property "sonar.projectKey", "${sonarGroup}:${project.name}"
+        property "sonar.projectName", "${project.name}"
+        property "sonar.junit.reportsPath", "build/test-results/test"
+        property "sonar.coverage.jacoco.xmlReportPaths", "${project.buildDir}/reports/jacoco.xml"
+        property "sonar.projectVersion", "${project.version}"
+        property "sonar.sources", "src/main"
+        property "sonar.tests", "src/test"
+        property "sonar.exclusions", ["build/**",
+                                      "src/main/java/com/discover/ddx/issuer/assurance/model/**",
+                                      "issuer-assurance-fitness-function/**",
+                                      "issuer-assurance-stubs/**",
+                                      "issuer-assurance-cc-mock/**"]
+
+        property "sonar.coverage.exclusions", ["src/main/java/com/discover/ddx/issuer/assurance/Main**",
+                                               "issuer-assurance-fitness-function/**",
+                                               "issuer-assurance-stubs/**",
+                                               "issuer-assurance-cc-mock/**",
+                                               "src/main/java/com/discover/ddx/issuer/assurance/advice/**",
+                                               "src/main/java/com/discover/ddx/issuer/assurance/filter/**",
+                                               "src/main/java/com/discover/ddx/issuer/provision/utility/**",
+                                               "src/main/java/com/discover/ddx/issuer/assurance/logging/**",
+                                               "src/main/java/com/discover/ddx/issuer/assurance/exception/**",
+                                               "src/main/java/com/discover/ddx/issuer/assurance/service/boarding/IssuerConfig.java",
+                                               "src/main/java/com/discover/ddx/issuer/assurance/service/auth/FileHelper.java",
+                                               "src/main/java/com/discover/ddx/issuer/assurance/controllers/TriggerInputEventController**",
+                                               "src/main/java/com/discover/ddx/issuer/assurance/config/**"]
+    }
+    jacoco {
+        toolVersion = "${jacocoToolsVersion}"
+    }
+
+    tasks.named("sonarqube"){
+        dependsOn test
+    }
+}
+
+jacocoTestReport {
+    reports {
+        xml.required = true
+        xml.outputLocation = file("${project.buildDir}/reports/jacoco.xml")
+    }
+}
+jacocoTestReport.dependsOn "test"
+test.finalizedBy jacocoTestReport
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            artifact tasks.named("bootJar").get()
+        }
+    }
+    repositories {
+        maven {
+            credentials {
+                username = System.getenv('NEXUS_USERNAME') ?: nexusUsername
+                password = System.getenv('NEXUS_PASSWORD') ?: nexusPassword
+            }
+            url nexusReleaseRepoURL
+        }
+    }
+}
+
+test {
+    useJUnitPlatform()
+}
+
+tasks.named("bootJar") {
+    archivesBaseName = ""
+    archiveClassifier = "boot"
+}
+
+tasks.register("bootRunLocalhost") {
+    group = "application"
+    description = "bootRun task actived with localhost profile"
+    doFirst {
+        tasks.bootRun.configure {
+            systemProperty("spring.profiles.active", "localhost")
+        }
+    }
+    finalizedBy("bootRun")
+}
+
+configurations {
+    cucumberRuntime {
+        extendsFrom testImplementation
+    }
+}
+
+def tags = (findProperty('tags') == null) ? 'not @Ignore' : findProperty('tags')
+
+tasks.register("cucumberTests") {
+    dependsOn assemble, testClasses
+    doLast {
+        javaexec {
+            main = "io.cucumber.core.cli.Main"
+            classpath = configurations.cucumberRuntime + sourceSets.test.output + sourceSets.main.output
+            args = [
+                    '--plugin', 'json:target/cucumber-reports.json',
+                    '--plugin', 'html:target/cucumber-reports.html',
+                    '--tags', "${tags}",
+                    '--glue', 'com.discover.ddx.issuer.assurance.bdd.stepdefs', 'src/test/resources']
+        }
+    }
+}
+
+tasks.register("intTest", Test) {
+    // Placeholder
+}
+
+
+dependencies {
+    implementation ("org.springframework.boot:spring-boot-starter-web:${springBootVersion}"){
+        exclude module: "logback-core"
+        exclude module: "logback-classic"
+    }
+    implementation "org.springframework:spring-webmvc:6.1.14"
+    implementation 'org.springframework:spring-web:6.1.12'
+    implementation 'org.springframework.boot:spring-boot-autoconfigure:3.1.0'
+    implementation 'org.springframework.security:spring-security-config:6.1.8'
+    implementation 'org.springframework.security:spring-security-core:6.1.8'
+    implementation 'com.google.guava:guava:32.0.1-jre'
+    implementation 'org.xerial.snappy:snappy-java:1.1.10.5'
+    implementation 'com.fasterxml.jackson.core:jackson-core:2.15.2'
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.1'
+    implementation "com.google.code.gson:gson:2.10"
+    implementation("org.springframework.retry:spring-retry:2.0.3")
+    implementation 'net.logstash.logback:logstash-logback-encoder:7.3'
+    implementation 'jakarta.validation:jakarta.validation-api:3.0.2'
+    implementation 'com.google.code.gson:gson:2.10.1'
+    implementation 'org.json:json:20231013'
+    implementation "com.discover.ddx:ddx-common:6.19.4-RELEASE"
+    implementation 'org.apache.httpcomponents.client5:httpclient5'
+
+
+    implementation 'org.springframework.boot:spring-boot-starter-actuator:3.1.8'
+    implementation 'org.springframework.boot:spring-boot-actuator:3.1.8'
+    implementation 'org.springframework.boot:spring-boot-actuator-autoconfigure:3.1.8'
+
+    // for JWT
+    implementation("com.discover.gateway:jwtApiAuthFilter:2.0.1"){
+        exclude group: "com.ibm.ws", module: "runtime:8.0.0"
+    }
+    implementation "org.springframework.boot:spring-boot-starter-validation:${springBootVersion}"
+    implementation "com.discover.ddx:ddx-security:6.19.3-RELEASE"
+    implementation 'org.apache.directory.studio:org.apache.commons.lang:2.6'
+    implementation 'org.projectlombok:lombok::1.18.27'
+    implementation 'org.junit.jupiter:junit-jupiter:5.7.0'
+    implementation 'commons-io:commons-io:2.15.0'
+    implementation 'org.mockito:mockito-core:5.14.1'
+    annotationProcessor 'org.projectlombok:lombok:1.18.26'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.26'
+    annotationProcessor "org.springframework.boot:spring-boot-configuration-processor"
+
+    // Test classpath
+    testImplementation "org.junit.jupiter:junit-jupiter-api:${jUnitVersion}"
+    testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:${jUnitVersion}"
+    testImplementation "org.springframework.boot:spring-boot-starter-test:${springBootVersion}"
+
+    testImplementation 'io.cucumber:cucumber-java:7.11.1'
+    testImplementation 'io.cucumber:cucumber-spring:7.11.1'
+    testImplementation 'io.cucumber:cucumber-junit:7.11.1'
+    testImplementation 'commons-io:commons-io:2.17.0'
+    testImplementation 'org.mockito:mockito-core:5.14.1'
+
+    implementation 'javax.xml.bind:jaxb-api:2.3.1'
+    implementation("net.logstash.logback:logstash-logback-encoder:7.3")
+
+    // Swagger
+    implementation "io.github.classgraph:classgraph:4.8.143"
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.1.0'
+    implementation "io.swagger.core.v3:swagger-core-jakarta:2.2.8"
+    implementation group: 'ch.qos.logback', name: 'logback-core', version: '1.5.6'
+    implementation group: 'ch.qos.logback', name: 'logback-classic', version: '1.5.6'
+
+    implementation("jakarta.xml.bind:jakarta.xml.bind-api:4.0.1")
+    implementation("com.sun.xml.bind:jaxb-impl:4.0.4")
+    implementation group: 'ch.qos.logback', name: 'logback-classic', version: '1.4.12'
+
+    implementation 'com.discover.epp.ddx:epp-ddx-jose:0.13.0'
+    implementation 'org.bitbucket.b_c:jose4j:0.9.5'
+    implementation "org.bouncycastle:bcprov-jdk18on:1.78"
+
+}
+
+configurations.configureEach {
+    //Threat level 8 in NexusIQ
+    //exclude group: "org.bitbucket.b_c", module: "jose4j"
+    exclude group: "org.springframework.boot", module: "spring-boot-starter-log4j2"
+    exclude group: "com.jayway.jsonpath", module: "json-path"
+    exclude group: "com.netflix.hystrix", module: "hystrix-core"
+    exclude group: "org.springframework.security", module: "spring-security-web"
+    resolutionStrategy.eachDependency { DependencyResolveDetails details ->
+        if (details.requested.name == 'spring-web') {
+            details.useVersion '6.1.12'
+        }
+        if (details.requested.group == 'commons-io') {
+            details.useVersion "2.17.0"
+        }
+        if (details.requested.name == 'spring-context') {
+            details.useVersion "6.1.14"
+        }
+        if (details.requested.name == 'snakeyaml') {
+            details.useVersion "2.3"
+        }
+    }
+}
